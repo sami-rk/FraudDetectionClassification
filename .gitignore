@@ -216,3 +216,10 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# Project outputs
+results_comparison.csv
+task1_classification_submission_*.csv
+
+# MiMoCode
+.mimocode/
