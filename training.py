@@ -1,11 +1,12 @@
 import numpy as np
 from sklearn.model_selection import StratifiedKFold
 from sklearn.metrics import f1_score, roc_auc_score, accuracy_score, precision_score, recall_score, confusion_matrix, matthews_corrcoef, cohen_kappa_score
-import lightgbm as lgb
-from config import FEATURE_COLS
+from config import FEATURE_COLS, CV_N_SPLITS, CV_RANDOM_STATE
+from models.registry import get_model
 
-def cross_validate_and_evaluate(train_p, y, global_mean):
-    skf = StratifiedKFold(n_splits=5, shuffle=True, random_state=42)
+
+def cross_validate_and_evaluate(train_p, y, global_mean, model_name='lightgbm', model_params=None):
+    skf = StratifiedKFold(n_splits=CV_N_SPLITS, shuffle=True, random_state=CV_RANDOM_STATE)
     oof_preds = np.zeros(len(y))
 
     for fold, (tr_idx, val_idx) in enumerate(skf.split(train_p, y)):
@@ -32,22 +33,9 @@ def cross_validate_and_evaluate(train_p, y, global_mean):
         X_tr, X_val = X_tr_df.values, X_val_df.values
         y_tr, y_val = y[tr_idx], y[val_idx]
 
-        model = lgb.LGBMClassifier(
-            n_estimators=500,
-            learning_rate=0.05,
-            max_depth=7,
-            num_leaves=63,
-            min_child_samples=20,
-            subsample=0.8,
-            colsample_bytree=0.8,
-            random_state=42,
-            n_jobs=-1,
-            verbose=-1
-        )
-
-        model.fit(X_tr, y_tr, eval_set=[(X_val, y_val)], callbacks=[lgb.early_stopping(50, verbose=False)])
-
-        oof_preds[val_idx] = model.predict_proba(X_val)[:, 1]
+        model = get_model(model_name, model_params)
+        model.fit(X_tr, y_tr, X_val, y_val)
+        oof_preds[val_idx] = model.predict_proba(X_val)
 
         fold_f1 = f1_score(y_val, (oof_preds[val_idx] > 0.50).astype(int))
         print(f"Fold {fold+1} F1 (@0.50): {fold_f1:.4f}")
@@ -78,4 +66,36 @@ def cross_validate_and_evaluate(train_p, y, global_mean):
     print(cm)
     print(f"Specificity: {tn / (tn + fp):.4f}")
 
-    return best_thresh
+    return {
+        'best_thresh': best_thresh,
+        'f1': f1_score(y, oof_labels),
+        'roc_auc': roc_auc_score(y, oof_preds),
+        'precision': precision_score(y, oof_labels),
+        'recall': recall_score(y, oof_labels),
+        'accuracy': accuracy_score(y, oof_labels),
+        'mcc': matthews_corrcoef(y, oof_labels),
+        'specificity': tn / (tn + fp),
+    }
+
+
+def cross_validate_all_models(train_p, y, global_mean, model_names=None, model_params_map=None):
+    from models import list_models as _list_models
+    if model_names is None:
+        model_names = _list_models()
+    if model_params_map is None:
+        model_params_map = {}
+
+    results = {}
+    for name in model_names:
+        print(f"\n{'='*50}")
+        print(f"  Training: {name}")
+        print(f"{'='*50}")
+        try:
+            params = model_params_map.get(name)
+            res = cross_validate_and_evaluate(train_p, y, global_mean, model_name=name, model_params=params)
+            results[name] = res
+        except Exception as e:
+            print(f"  FAILED: {e}")
+            results[name] = {'error': str(e)}
+
+    return results
