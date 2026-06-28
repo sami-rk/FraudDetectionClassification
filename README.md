@@ -6,37 +6,81 @@ Binary classification model to predict whether a retail transaction is fraudulen
 
 | File | Description |
 |---|---|
-| `config.py` | Constants, column lists, feature definitions |
+| `config.py` | Constants, column lists, feature definitions, CV settings |
 | `preprocessing.py` | Boolean normalization, timestamp parsing, median imputation, label encoding |
 | `feature_engineering.py` | Derived features (ratios, risk scores, interaction terms) |
-| `training.py` | Stratified 5-fold CV, threshold optimization, evaluation metrics |
+| `training.py` | Stratified 5-fold CV, threshold optimization, evaluation metrics, multi-model comparison |
 | `prediction.py` | Full-data retraining, test prediction, submission CSV generation |
-| `pipeline.py` | Orchestrates all modules in sequence |
-| `task1_classification.py` | Original monolithic script (reference) |
+| `pipeline.py` | CLI orchestrator with single/compare/finetune modes |
+| `models/` | Modular model registry with 8 swappable classifiers |
+| `finetune/` | Hyperparameter tuning (Optuna TPE + GridSearchCV) |
+
+## Models
+
+| Model | Class | Key Features |
+|---|---|---|
+| `lightgbm` | Gradient Boosting | Early stopping, original defaults |
+| `xgboost` | Gradient Boosting | scale_pos_weight for imbalance |
+| `catboost` | Gradient Boosting | Built-in F1 eval, categorical handling |
+| `random_forest` | Bagging | class_weight='balanced' |
+| `logistic_regression` | Linear | StandardScaler, class_weight='balanced' |
+| `linear_svc` | Linear SVM | CalibratedClassifierCV for probabilities |
+| `svc` | RBF SVM | StandardScaler, probability=True |
+| `nu_svc` | Nu-SVM | StandardScaler, probability=True |
 
 ## How to Run
 
 ```bash
+# Install dependencies
+pip install -r requirements.txt
+
+# Run default model (lightgbm)
 python pipeline.py
+
+# Run specific model
+python pipeline.py xgboost
+
+# Compare all available models
+python pipeline.py compare
+
+# Compare specific models
+python pipeline.py compare lightgbm xgboost catboost
+
+# Finetune with Optuna (default, 50 trials)
+python pipeline.py finetune lightgbm optuna 50
+
+# Finetune with GridSearch
+python pipeline.py finetune xgboost grid_search
+
+# List available models
+python pipeline.py list
 ```
 
 ## Pipeline Steps
 
-1. **Load Data** — Read train (`datasets/train.xlsx`) and test (`datasets/student_test.xlsx`)
-2. **Preprocessing** — Normalize booleans, fix noisy strings (`many`→100, `new_user?`→0), parse timestamps, fill missing with medians
+1. **Load Data** — Read train and test datasets
+2. **Preprocessing** — Normalize booleans, fix noisy strings, parse timestamps, fill missing with medians
 3. **Label Encoding** — Fit encoders on combined train+test categorical columns
-4. **Feature Engineering** — Create `amount_vs_avg_ratio`, `risk_score`, `high_freq_flag`, `failed_x_freq`, `new_account`
-5. **Aggregation Features** — Compute customer/merchant/location fraud rates within each CV fold (leakage-free)
-6. **Cross-Validation** — 5-fold StratifiedKFold with LightGBM, early stopping
+4. **Feature Engineering** — Create ratios, risk scores, interaction terms
+5. **Aggregation Features** — Compute customer/merchant/location fraud rates per CV fold (leakage-free)
+6. **Cross-Validation** — 5-fold StratifiedKFold with early stopping (gradient boosting models)
 7. **Threshold Optimization** — Search 0.0–1.0 to maximize F1 on OOF predictions
 8. **Final Model** — Retrain on full training data, predict test set
 
-## Model
+## Finetuning
 
-- **Algorithm**: LightGBM (Gradient Boosting)
-- **Parameters**: n_estimators=500, lr=0.05, max_depth=7, num_leaves=63, subsample=0.8, colsample_bytree=0.8
+### Optuna (Default)
+- TPE-based Bayesian optimization
+- Predefined search spaces per model
+- Configurable n_trials (default 50)
+- Inner CV loop with threshold search
 
-## Results (OOF)
+### GridSearchCV
+- Exhaustive grid search over smaller parameter grids
+- Sklearn-compatible interface
+- Parallel execution with n_jobs=-1
+
+## Results (OOF — LightGBM baseline)
 
 | Metric | Value |
 |---|---|
@@ -49,23 +93,6 @@ python pipeline.py
 | Cohen Kappa | 0.4070 |
 | Specificity | 0.5142 |
 | **Best Threshold** | **0.27** |
-
-### Confusion Matrix
-
-|  | Predicted 0 | Predicted 1 |
-|---|---|---|
-| **Actual 0** | 21,569 | 20,378 |
-| **Actual 1** | 3,764 | 34,289 |
-
-### Fold-wise F1 (@0.50)
-
-| Fold | F1 |
-|---|---|
-| 1 | 0.6660 |
-| 2 | 0.6688 |
-| 3 | 0.6743 |
-| 4 | 0.6699 |
-| 5 | 0.6718 |
 
 ## Features Used (27)
 
