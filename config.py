@@ -18,3 +18,7 @@ FEATURE_COLS = [
     'high_freq_flag', 'failed_x_freq', 'new_account',
     'cust_fraud_rate', 'cust_txn_count', 'merchant_fraud_rate', 'location_fraud_rate'
 ]
+
+DEFAULT_MODEL = 'lightgbm'
+CV_N_SPLITS = 5
+CV_RANDOM_STATE = 42
